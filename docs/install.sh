@@ -3,11 +3,11 @@
 set -euo pipefail
 
 echo "!!! WARNING !!!"
-echo "  This script is deprecated: using it is highly discouraged."
-echo "  Whenever possible, please use the other install methods listed on the https://desktop.turbowarp.org/ website."
-echo "  The other methods are typically more secure, often support automatic updates, integrate better into the rest of your system, and can be easily uninstalled."
+echo "  This script is deprecated: using it is highly discouraged and it may cease to receive updates or function in the near future."
+echo "  Please use the other install methods listed on the https://desktop.turbowarp.org/ website."
+echo "  The other methods are typically more secure, often support automatic updates, integrate better into the rest of your system, and are usually easier to uninstall."
 echo ""
-echo "Press enter to continue."
+echo "Press enter to continue anyways."
 read
 
 fatal() {
@@ -32,7 +32,7 @@ if [ "$(whoami)" != "root" ]; then
     fatal "Must be run as root."
 fi
 
-VERSION="1.0.0"
+VERSION="1.1.3"
 ARCH="$(uname -m)"
 echo "Version: $VERSION"
 echo "System archictecture: $ARCH"

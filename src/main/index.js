@@ -13,6 +13,7 @@ import * as store from './store';
 import './crash';
 import parseArgs from './parse-args';
 import {isDevelopment, isMac, isLinux, staticDir} from './environment';
+import './library-files';
 
 const readFile = util.promisify(fs.readFile);
 const writeFile = util.promisify(fs.writeFile);
@@ -25,11 +26,13 @@ let aboutWindow = null;
 let addonSettingsWindow = null;
 let privacyWindow = null;
 let desktopSettingsWindow = null;
+const dataWindows = new Set();
 const closeAllNonEditorWindows = () => [
   aboutWindow,
   addonSettingsWindow,
   privacyWindow,
-  desktopSettingsWindow
+  desktopSettingsWindow,
+  ...dataWindows
 ].filter((i) => i).forEach((i) => i.close())
 
 const allowedToAccessFiles = new Set();
@@ -37,30 +40,17 @@ const allowedToAccessFiles = new Set();
 const isSafeOpenExternal = (url) => {
   try {
     const parsedUrl = new URL(url);
-    // Don't allow file:// or other unsafe protocols
-    if (
-      parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:'
-    ) {
-      return false;
-    }
-    // We want to be extra careful, so we'll also limit the domains
-    // Not sure if this really does anything meaningful...
-    if (
-      parsedUrl.origin !== 'https://scratch.mit.edu' &&
-      parsedUrl.origin !== 'https://desktop.turbowarp.org' &&
-      parsedUrl.origin !== 'https://docs.turbowarp.org' &&
-      parsedUrl.origin !== 'https://github.com' &&
-      // Addons
-      parsedUrl.href !== 'https://www.youtube.com/griffpatch' &&
-      // Packager
-      parsedUrl.origin !== 'https://packager.turbowarp.org' &&
-      parsedUrl.origin !== 'https://experiments.turbowarp.org' &&
-      parsedUrl.origin !== 'https://turbowarp.org' &&
-      parsedUrl.origin !== 'https://fosshost.org'
-    ) {
-      return false;
-    }
-    return true;
+    return parsedUrl.protocol === 'https:' || parsedUrl.protocol === 'http:';
+  } catch (e) {
+    // ignore
+  }
+  return false;
+};
+
+const isDataURL = (url) => {
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === 'data:';
   } catch (e) {
     // ignore
   }
@@ -72,6 +62,9 @@ const defaultWindowOpenHandler = (details) => {
     setImmediate(() => {
       shell.openExternal(details.url);
     });
+  }
+  if (isDataURL(details.url)) {
+    createDataWindow(details.url);
   }
   return {
     action: 'deny'
@@ -148,9 +141,11 @@ const getWindowOptions = (options) => {
   options.useContentSize = true;
   options.minWidth = 200;
   options.minHeight = 200;
-  options.webPreferences = {
-    preload: pathUtil.resolve(pathUtil.join(__dirname, 'preload.js'))
-  };
+  options.webPreferences ||= {};
+  if (typeof options.webPreferences.preload === 'undefined') {
+    // only undefined should be replaced as null is interpreted as "no preload script"
+    options.webPreferences.preload = pathUtil.resolve(__dirname, 'preload.js')
+  }
 
   const activeScreen = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const bounds = activeScreen.workArea;
@@ -276,7 +271,7 @@ const createDesktopSettingsWindow = () => {
     desktopSettingsWindow = createWindow(getURL('desktop-settings'), {
       title: getTranslation('desktop-settings'),
       width: 500,
-      height: 300
+      height: 350
     });
     desktopSettingsWindow.on('closed', () => {
       desktopSettingsWindow = null;
@@ -298,7 +293,7 @@ const createPackagerWindow = (editorWebContents) => {
   window.on('page-title-updated', (e, title) => {
     e.preventDefault();
     // title will be something like "Project - TurboWarp Packager for Scratch"
-    // the for Scratch looks ugly in a native window, so remove that
+    // the "for Scratch" looks ugly in a native window, so remove that
     window.setTitle(title.replace(/ for Scratch$/, ''));
   });
   window.webContents.setWindowOpenHandler((details) => {
@@ -310,7 +305,11 @@ const createPackagerWindow = (editorWebContents) => {
           title: 'Loading Preview',
           width: 640,
           height: 480,
-          parent: window
+          parent: window,
+          webPreferences: {
+            // preview window can have arbitrary custom JS and should not have access to special APIs
+            preload: null
+          }
         })
       };
     }
@@ -320,6 +319,22 @@ const createPackagerWindow = (editorWebContents) => {
     closeWindowWhenPressEscape(newWindow);
   });
   return window;
+};
+
+const createDataWindow = (url) => {
+  const window = createWindow(url, {
+    title: APP_NAME,
+    width: 480,
+    height: 360,
+    webPreferences: {
+      preload: null
+    }
+  });
+  closeWindowWhenPressEscape(window);
+  window.on('closed', () => {
+    dataWindows.delete(window);
+  });
+  dataWindows.add(window);
 };
 
 const getLastAccessedDirectory = () => store.get('last_accessed_directory') || '';
@@ -701,6 +716,8 @@ app.on('web-contents-created', (event, webContents) => {
     }
   });
 });
+
+app.enableSandbox();
 
 const acquiredLock = app.requestSingleInstanceLock();
 if (acquiredLock) {
